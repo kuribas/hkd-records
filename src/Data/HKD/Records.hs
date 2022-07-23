@@ -17,12 +17,47 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DefaultSignatures #-}
+
+{-|
+Module      : Data.HKD.Records
+Description : Make higher kinded records great again
+Copyright   : (c) Kristof Bastiaensen, 2022
+License     : BSD-3
+Maintainer  : kristof@resonata.be
+Stability   : stable
+Portability : ghc
+
+This module contains additions for the hkd package to making it easier
+for working with higher kinded records.  In particular, it gives
+access to the fieldNames of a records using the `fieldNames` function,
+allows you to zip many records together using `fzipManyWith`, and
+allows functions with constraints by using the `fdicts` function.
+This makes it possible to implement many generic functions using these
+functions rather than having to implement complicated typeclasses for
+Generics.  As an example, here is a (poor mans) url encoding function:
+
+@
+zipShow :: (FFoldable t, FRepeat t, FieldNames t, FDicts Show t, FZip t) =>
+            t Identity -> Text
+zipShow t =
+   Text.concat $
+   intersperse "&" $
+   ftoList $ 
+   fzipManyWith
+   (\(Identity y :> Const lbl :> Dict :> End) ->
+       Const $ lbl <> "=" <> Text.pack (show y))
+   (t :~> fieldNames :~> fdicts @Show :~> End)
+@
+
+-}
+
 module Data.HKD.Records (
-  FLabels(..), gflabels,
-  Dict(..), FDicts(..), gfdicts,
-  HkdProd(..), LkdProd(..), End,
+  FieldNames(..),
+  Dict(..), FDicts(..),
+  RecordCons(..), FieldCons(..), End,
   fzipManyWith, ftoList, Lens', FLens(..),
-  FLenses(..), gflenses) where
+  FLenses(..)) where
 import Data.HKD
 import Data.Text (Text)
 import Data.Functor.Const
@@ -32,46 +67,49 @@ import Data.Coerce
 import qualified Data.Text as Text
 import Data.Proxy
 import Data.Monoid
-import Data.Functor.Identity
-import Data.List
 
-class FLabels t where
-  -- | get the labels from each field as a (Const Text).
-  flabels :: t (Const Text)
+class FieldNames t where
+  -- | get the fieldNames from each field as a (Const Text).  Can be
+  -- auto derived for records with a Generic instance.
+  default fieldNames :: (Generic (t (Const Text)),
+                       GFieldNames (Rep (t (Const Text)) ()))
+                  => t (Const Text)
+  fieldNames = to (genFieldNames :: Rep (t (Const Text)) ())                  
+  fieldNames :: t (Const Text)
 
-class GLabels t where
-  genFlabels :: t
+class GFieldNames t where
+  genFieldNames :: t
   
-instance (GLabels (f ()), GLabels (g ())) => GLabels ((f :*: g) ()) where
-  genFlabels = genFlabels :*: genFlabels
-  {-# INLINE genFlabels #-}
+instance (GFieldNames (f ()), GFieldNames (g ())) => GFieldNames ((f :*: g) ()) where
+  genFieldNames = genFieldNames :*: genFieldNames
+  {-# INLINE genFieldNames #-}
 
-instance KnownSymbol label =>
-         (GLabels (S1 ('MetaSel ('Just label) _x _x2 _x3)
+instance KnownSymbol fieldName =>
+         (GFieldNames (S1 ('MetaSel ('Just fieldName) _x _x2 _x3)
                     (Rec0 (Const Text b))
                     ())) where
-  genFlabels = M1 $ K1 $ Const (Text.pack $ symbolVal (Proxy @label))
-  {-# INLINE genFlabels #-}
+  genFieldNames = M1 $ K1 $ Const (Text.pack $ symbolVal (Proxy @fieldName))
+  {-# INLINE genFieldNames #-}
   
-instance GLabels (b ()) => (GLabels ((D1 meta (C1 meta2 b)) ())) where
-  genFlabels = M1 $ M1 $ genFlabels
-  {-# INLINE genFlabels #-}
+instance GFieldNames (b ()) => (GFieldNames ((D1 meta (C1 meta2 b)) ())) where
+  genFieldNames = M1 $ M1 $ genFieldNames
+  {-# INLINE genFieldNames #-}
 
--- | Automatically derive flabels using generics.  This only requires
--- a Generic instance for your datatype.
-gflabels :: forall t . (Generic (t (Const Text)),
-                        GLabels (Rep (t (Const Text)) ()))
-         => t (Const Text)
-gflabels = to (genFlabels :: Rep (t (Const Text)) ())
-    
 data Dict c (t :: k) where
-  -- | reified type class dictionary.  You need to put the constructor
-  -- in scope in order to use the contained typeclass dictionaries.
+  -- | reified type class dictionary. You can use the contained
+  -- typeclass by putting the `Dict` constructor somewhere within
+  -- scope. Can be auto derived with a Generic instance.
   Dict :: c t => Dict c t
 
 class FDicts c t where
   -- | hkd record containing the reified type class dictionaries for
-  -- each field.
+  -- each field.  This allows you to use functions with constraints by
+  -- combining `fdicts` with `fzipWith` or `fzipManyWith`.  Can be
+  -- auto derived with a Generic instance.
+  default fdicts :: (Generic (t (Dict c)),
+                     GFDicts (Rep (t (Dict c)) ()))
+                 => t (Dict c)
+  fdicts = to (genFdict :: Rep (t (Dict c)) ())
   fdicts :: t (Dict c)
 
 class GFDicts t where
@@ -92,22 +130,15 @@ instance GFDicts (b ()) => (GFDicts ((D1 meta (C1 meta2 b)) ())) where
   genFdict = M1 $ M1 $ genFdict
   {-# INLINE genFdict #-}
 
--- | Automatically derive fdict using generics.  This only requires a
--- Generic instance for your datatype.
-gfdicts :: forall t c . (Generic (t (Dict c)),
-                        GFDicts (Rep (t (Dict c)) ()))
-         => t (Dict c)
-gfdicts = to (genFdict :: Rep (t (Dict c)) ())
-
 infixr 5 :>
 infixr 5 :~>
 
 -- | A heterogenous list of higher kinded records.  Use `:~>` to
 -- separate the items, and `End` to terminate them.
-data HkdProd (f :: a -> *) g t = t f :~> g t
+data RecordCons (f :: a -> *) g t = t f :~> g t
 -- | A heterogenous list of fields.  Use `:>` to separate the items,
 -- and `End` to terminate them.
-data LkdProd f g (x :: a) = f x :> g x
+data FieldCons f g (x :: a) = f x :> g x
 -- | The terminator.
 data End (t :: k) = End
 
@@ -118,7 +149,7 @@ instance FRepeat t => GFTranspose End t End where
   gftranspose End = frepeat End
 
 instance (FZip t, GFTranspose g t g') => 
-  GFTranspose (HkdProd f g) t (LkdProd f g') where
+  GFTranspose (RecordCons f g) t (FieldCons f g') where
   gftranspose (tf :~> tg) = fzipWith (:>) tf $ gftranspose tg
 
 -- | zip over many arguments.  The function must take a heterogenous
@@ -129,16 +160,10 @@ instance (FZip t, GFTranspose g t g') =>
 -- For example:
 --
 -- @
--- zipShow :: (FFoldable t, FRepeat t, FLabels t, FDicts Show t, FZip t) =>
---            t Identity -> Text
--- zipShow t =
---   Text.concat $
---   intersperse "&" $
---   ftoList $ 
 --   fzipManyWith
 --   (\(Identity y :> Const lbl :> Dict :> End) ->
 --       Const $ lbl <> "=" <> Text.pack (show y))
---   (t :~> flabels :~> fdicts @Show :~> End)
+--   (t :~> fieldNames :~> fdicts @Show :~> End)
 -- @
 
 fzipManyWith :: ( FFunctor t, GFTranspose x t f) =>
@@ -164,16 +189,22 @@ compIsoFLens :: (s g -> t g) -> (t g -> s g) -> FLens g s a -> FLens g t a
 compIsoFLens wrap unwrap = compFLens (iso wrap unwrap)
 {-# INLINE compIsoFLens #-}
 
-class FLenses t where
-  -- A record of lenses into the record.
+class FLenses (t :: (k -> *) -> *) where
+  -- A record of lenses into the record.  Can be auto derived with a
+  -- Generic instance.
+  default flenses :: forall r g . GFlensesMachinery k t r g
+                  => t (FLens g t)
+  flenses = ffmap (compIsoFLens toHkd fromHkd) $
+            toHkd (genflenses @(Rep (t g)) @k @r)
+  {-# INLINE flenses #-}
   flenses :: t (FLens g t)
 
 -- newtype to get rid of the extra type variable
 newtype Tupled f (a :: k) = Tupled {unTupled :: f a ()}
 
 -- these newtypes just rearrange the type variables so they 
-newtype FunctorS1 label _x _x2 _x3 a g k =
-  FunctorS1 { getFunctorS1 :: (S1 ('MetaSel label _x _x2 _x3)
+newtype FunctorS1 fieldName _x _x2 _x3 a g k =
+  FunctorS1 { getFunctorS1 :: (S1 ('MetaSel fieldName _x _x2 _x3)
                                (Rec0 (g a))
                                k)}
 
@@ -182,7 +213,7 @@ newtype FunctorD1 meta meta2 f l k =
 
 newtype FunctorProd f g a k = FunctorProd ((f a :*: g a) k)
 
-instance FFunctor (Tupled (FunctorS1 label _x _x2 _x3 a)) where
+instance FFunctor (Tupled (FunctorS1 fieldName _x _x2 _x3 a)) where
   ffmap f (Tupled (FunctorS1 (M1 (K1 x))))
     = Tupled $ FunctorS1 $ M1 $ K1 $ f x
   {-# INLINE ffmap #-}
@@ -207,10 +238,10 @@ class Coercible (x ()) (Tupled r g) =>
   GFLenses (x :: * -> *) k (r :: (k -> *) -> * -> *) g | x -> k, x -> r where
   genflenses :: Tupled r (FLens g (Tupled r))
   
-instance GFLenses ((S1 ('MetaSel label _x _x2 _x3)
+instance GFLenses ((S1 ('MetaSel fieldName _x _x2 _x3)
                     (Rec0 (g (a :: k))) :: * -> *))
                    k
-                  (FunctorS1 label _x _x2 _x3 a)
+                  (FunctorS1 fieldName _x _x2 _x3 a)
                   g where
   genflenses = Tupled $ FunctorS1 $ M1 $ K1 $ FLens $ \f g ->
     ( Tupled . FunctorS1  . M1 . K1 ) <$>
@@ -262,14 +293,6 @@ type GFlensesMachinery k t r g =
   , GFLenses (Rep (t g)) k (r :: (k -> *) -> * -> *) g
   )
 
--- | Autogenerate lenses using generics.  You only need to derive
--- Generic for the datatype.
-gflenses :: forall k t r g . GFlensesMachinery k t r g
-         => t (FLens g t)
-gflenses = ffmap (compIsoFLens toHkd fromHkd) $
-           toHkd (genflenses @(Rep (t g)) @k @r)
-{-# INLINE gflenses #-}
-
 toHkd :: forall t g r.
          ( Generic (t g)
          , Coercible (r g ()) (Rep (t g) ())
@@ -286,7 +309,7 @@ fromHkd :: forall t g r.
 fromHkd r = coerce (from r :: Rep (t g) ())
 {-# INLINE fromHkd #-}
 
--- | collect (Const) elements into a list efficiently.
+-- | collect `Const` elements into a list efficiently.
 ftoList :: FFoldable t => t (Const a) -> [a]
 ftoList = flip appEndo [] . ffoldMap (Endo . (:) . getConst)
 
