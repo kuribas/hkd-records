@@ -55,7 +55,7 @@ zipShow t =
 module Data.HKD.Records (
   FieldNames(..),
   Dict(..), FDicts(..),
-  RecordCons(..), FieldCons(..), End,
+  RecordCons(..), FieldCons(..), End(..),
   fzipManyWith, ftoList, Lens', FLens(..),
   FLenses(..)) where
 import Data.HKD
