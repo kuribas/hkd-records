@@ -97,6 +97,9 @@ instance GFieldNames (b ()) => (GFieldNames ((D1 meta (C1 meta2 b)) ())) where
   genFieldNames = M1 $ M1 $ genFieldNames
   {-# INLINE genFieldNames #-}
 
+instance (GFieldNames (U1 ())) where
+  genFieldNames = U1
+
 data Dict c (t :: k) where
   -- | reified type class dictionary. You can use the contained
   -- typeclass by putting the `Dict` constructor somewhere within
@@ -131,6 +134,9 @@ instance c b =>
 instance GFDicts (b ()) => (GFDicts ((D1 meta (C1 meta2 b)) ())) where
   genFdict = M1 $ M1 $ genFdict
   {-# INLINE genFdict #-}
+
+instance GFDicts (U1 ()) where
+  genFdict = U1
 
 tupleToList :: Type -> Maybe [Type]
 tupleToList (AppT (TupleT _) t) = Just [t]
