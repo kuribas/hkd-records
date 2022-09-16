@@ -1,5 +1,5 @@
 name:                hkd-records
-version:             0.0.4
+version:             0.0.5
 cabal-version:       >=1.10
 synopsis:  higher kinded record operations
 description: make higher kinded records great again
@@ -22,7 +22,8 @@ Library
   default-language: Haskell2010
   Build-depends: base >= 3 && < 5,
                  hkd >= 0.1 && < 0.3,
-                 text >= 1.2 && < 1.3
+                 text >= 1.2 && < 1.3,
+                 template-haskell >= 2.14.0.0
   hs-source-dirs:
     src                 
   Exposed-Modules:

@@ -18,6 +18,7 @@
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 {-|
 Module      : Data.HKD.Records
@@ -54,7 +55,7 @@ zipShow t =
 
 module Data.HKD.Records (
   FieldNames(..),
-  Dict(..), FDicts(..),
+  Dict(..), FDicts(..), newConstraint,
   RecordCons(..), FieldCons(..), End(..),
   fzipManyWith, ftoList, Lens', FLens(..),
   FLenses(..)) where
@@ -67,6 +68,7 @@ import Data.Coerce
 import qualified Data.Text as Text
 import Data.Proxy
 import Data.Monoid
+import Language.Haskell.TH
 
 class FieldNames t where
   -- | get the fieldNames from each field as a (Const Text).  Can be
@@ -130,6 +132,38 @@ instance GFDicts (b ()) => (GFDicts ((D1 meta (C1 meta2 b)) ())) where
   genFdict = M1 $ M1 $ genFdict
   {-# INLINE genFdict #-}
 
+tupleToList :: Type -> Maybe [Type]
+tupleToList (AppT (TupleT _) t) = Just [t]
+tupleToList (AppT t1 t2) = (t2:) <$> tupleToList t1
+tupleToList _ = Nothing
+
+-- | Template Haskell function to create a new constraint from a list
+-- of existing constraints.  Unlike a type synonym or type family,
+-- this constraint can be partially applied, and used inside `FDicts`.
+-- This just generates a class and instance without member functions.
+--
+-- example usage:
+-- 
+-- > newConstraint "MyConstraints"
+-- >   [t| forall r . (FFoldable r, FRepeat r, FieldNames r) |]
+--
+-- This creates a constraint @MyConstraints :: ((k -> Type) -> Type) -> Type@,
+-- which combines the constraint `FFoldable`, `FRepeat` and `FieldNames`
+newConstraint :: String -> Q Type -> Q [Dec]
+newConstraint nm defQ = do
+  def <- defQ
+  let failmsg = "expected form for constraint body: forall c . (Constraint1 c, Constraint2 c, ...)"
+  case def of
+    ForallT [PlainTV tyvar] [] body ->
+      case tupleToList body of
+        Nothing -> fail failmsg
+        Just l -> sequence
+          [ classD (pure (reverse l)) (mkName nm) [PlainTV tyvar] [] []
+          , instanceD (pure (reverse l)) (appT (conT $ mkName nm) (varT tyvar))
+            []
+          ]
+    _ -> fail failmsg
+  
 infixr 5 :>
 infixr 5 :~>
 
