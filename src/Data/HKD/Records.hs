@@ -19,6 +19,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 
 {-|
 Module      : Data.HKD.Records
@@ -55,7 +56,7 @@ zipShow t =
 
 module Data.HKD.Records (
   FieldNames(..),
-  Dict(..), FDicts(..), newConstraint,
+  Dict(..), FDicts(..), newConstraint, (:&),
   RecordCons(..), FieldCons(..), End(..),
   fzipManyWith, ftoList, Lens', FLens(..),
   FLenses(..)) where
@@ -172,6 +173,13 @@ newConstraint nm defQ = do
   
 infixr 5 :>
 infixr 5 :~>
+
+-- | combine constraints.  This also generates a new FDicts instance
+-- for the combined constraint.
+class (c1 a, c2 a) => (c1 :& c2) a
+instance (c1 a, c2 a) => (c1 :& c2) a
+instance (FZip r, FDicts c1 r, FDicts c2 r) => FDicts (c1 :& c2) r where
+  fdicts = fzipWith (\Dict Dict -> Dict) (fdicts @c1) (fdicts @c2)
 
 -- | A heterogenous list of higher kinded records.  Use `:~>` to
 -- separate the items, and `End` to terminate them.

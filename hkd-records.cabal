@@ -1,5 +1,5 @@
 name:                hkd-records
-version:             0.0.6
+version:             0.0.7
 cabal-version:       >=1.10
 synopsis:  higher kinded record operations
 description: make higher kinded records great again
