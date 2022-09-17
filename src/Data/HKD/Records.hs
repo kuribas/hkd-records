@@ -56,7 +56,7 @@ zipShow t =
 
 module Data.HKD.Records (
   FieldNames(..),
-  Dict(..), FDicts(..), newConstraint, (:&),
+  Dict(..), FDicts(..), newConstraint, (:&), (:.),
   RecordCons(..), FieldCons(..), End(..),
   fzipManyWith, ftoList, Lens', FLens(..),
   FLenses(..)) where
@@ -170,9 +170,9 @@ newConstraint nm defQ = do
             []
           ]
     _ -> fail failmsg
-  
-infixr 5 :>
-infixr 5 :~>
+
+infixr 6 :&
+infixr 7 :.
 
 -- | combine constraints.  This also generates a new FDicts instance
 -- for the combined constraint.
@@ -180,6 +180,16 @@ class (c1 a, c2 a) => (c1 :& c2) a
 instance (c1 a, c2 a) => (c1 :& c2) a
 instance (FZip r, FDicts c1 r, FDicts c2 r) => FDicts (c1 :& c2) r where
   fdicts = fzipWith (\Dict Dict -> Dict) (fdicts @c1) (fdicts @c2)
+
+-- | compose constraints.
+class f (g a) => (f :. g) a
+instance f (g a) => (f :. g) a
+instance (FZip r, FDicts (c1 :. f) r, FDicts (c2 :. f) r) =>
+         FDicts ((c1 :& c2) :. f) r where
+  fdicts = fzipWith (\Dict Dict -> Dict) (fdicts @(c1 :. f)) (fdicts @(c2 :. f))
+  
+infixr 5 :>
+infixr 5 :~>
 
 -- | A heterogenous list of higher kinded records.  Use `:~>` to
 -- separate the items, and `End` to terminate them.
